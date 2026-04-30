@@ -3,6 +3,9 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 
+const http = require("http");
+const { Server } = require("socket.io");
+
 const { connectDb } = require('./config/db');
 const errorHandler = require('./middleware/errorHandler');
 
@@ -46,9 +49,23 @@ async function bootstrap() {
 
     await connectDb(process.env.MONGODB_URI, 'nestmate');
 
-    app.listen(port, () => {
-      console.log(`🚀 Server on port ${port}`);
+    // ✅ Create HTTP server
+    const server = http.createServer(app);
+
+    // ✅ Attach socket
+    const io = new Server(server, {
+      cors: {
+        origin: "*", // later restrict
+      },
     });
+
+    // ✅ Initialize socket logic
+    require('./socket')(io);
+
+    server.listen(port, () => {
+      console.log(`🚀 Server with Socket on port ${port}`);
+    });
+
   } catch (err) {
     console.error('❌ Startup error:', err);
     process.exit(1);
