@@ -19,10 +19,14 @@ module.exports = (io) => {
           ...msg,
           timestamp: new Date(),
         };
-
-        await roomChatCol.insertOne(doc);
-
+        
         io.to(msg.householdId).emit("receive_message", doc);
+        
+        try {
+          await roomChatCol.insertOne(doc);
+        } catch (err) {
+          console.error("DB save failed:", err);
+        }
 
       } catch (err) {
         console.error("Socket error:", err);
