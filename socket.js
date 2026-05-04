@@ -1,4 +1,6 @@
 const { getDb } = require("./config/db");
+const { messagesCacheKey } = require("./utils/cacheKeys");
+const { deleteCache } = require("./utils/redis");
 
 module.exports = (io) => {
   io.on("connection", (socket) => {
@@ -20,8 +22,6 @@ module.exports = (io) => {
           isAnnouncement: msg.isAnnouncement || false,
           isPinned: msg.isPinned || false,
           timestamp: new Date(),
-          // track which users have seen this message (room chat -> multiple users)
-          seenBy: msg.seenBy || [],
         };
         
         io.to(msg.householdId).emit("receive_message", doc);
@@ -37,52 +37,58 @@ module.exports = (io) => {
       }
     });
 
-    // mark messages in a household as seen by a specific user
-    // payload: { householdId, userId }
-    socket.on("markAsSeen", async ({ householdId, userId }) => {
+    // mark direct messages as read between two users
+    // payload: { otherEmail, userEmail }
+    socket.on("markAsSeen", async ({ otherEmail, userEmail }) => {
       try {
         const db = getDb();
-        const roomChatCol = db.collection("room_chat");
+        const messagesCol = db.collection("messages");
 
-        if (!householdId || !userId) return;
+        if (!otherEmail || !userEmail) return;
 
-        // add userId to seenBy for all unseen messages in the household
-        await roomChatCol.updateMany(
-          { householdId, seenBy: { $ne: userId } },
-          { $addToSet: { seenBy: userId } }
+        // ✅ PERSIST TO DATABASE: mark all unread messages from otherEmail as read
+        await messagesCol.updateMany(
+          { fromEmail: otherEmail, toEmail: userEmail, read: false },
+          { $set: { read: true, readAt: new Date() } }
         );
 
-        // compute unread count for this user in the household
-        const unreadCount = await roomChatCol.countDocuments({
-          householdId,
-          seenBy: { $ne: userId },
+        // ✅ INVALIDATE REDIS CACHE so polling gets fresh data
+        await deleteCache(messagesCacheKey(userEmail));
+        await deleteCache(messagesCacheKey(otherEmail));
+
+        // get updated unread count for this conversation
+        const unreadCount = await messagesCol.countDocuments({
+          fromEmail: otherEmail,
+          toEmail: userEmail,
+          read: false,
         });
 
-        // reply only to the requesting socket with the updated count
-        socket.emit("unreadCount", { householdId, userId, count: unreadCount });
+        // emit updated count back to client
+        socket.emit("unreadCount", { from: otherEmail, count: unreadCount });
 
-        // optionally notify the room that messages were marked seen
-        io.to(householdId).emit("messagesMarkedSeen", { householdId, userId });
+        console.log(`✅ Marked as read: ${otherEmail} → ${userEmail}. Remaining unread: ${unreadCount}`);
       } catch (err) {
         console.error("markAsSeen error:", err);
       }
     });
 
-    // get unread count for a user in a household
-    // payload: { householdId, userId }
-    socket.on("getUnreadCount", async ({ householdId, userId }) => {
+    // get unread count for a specific conversation between two users
+    // payload: { otherEmail, userEmail }
+    socket.on("getUnreadCount", async ({ otherEmail, userEmail }) => {
       try {
         const db = getDb();
-        const roomChatCol = db.collection("room_chat");
+        const messagesCol = db.collection("messages");
 
-        if (!householdId || !userId) return;
+        if (!otherEmail || !userEmail) return;
 
-        const unreadCount = await roomChatCol.countDocuments({
-          householdId,
-          seenBy: { $ne: userId },
+        // count unread messages from otherEmail to userEmail
+        const unreadCount = await messagesCol.countDocuments({
+          fromEmail: otherEmail,
+          toEmail: userEmail,
+          read: false,
         });
 
-        socket.emit("unreadCount", { householdId, userId, count: unreadCount });
+        socket.emit("unreadCount", { from: otherEmail, count: unreadCount });
       } catch (err) {
         console.error("getUnreadCount error:", err);
       }
