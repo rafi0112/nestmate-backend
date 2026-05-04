@@ -3,5 +3,6 @@ const roomChatController = require('../controllers/roomChat.controller');
 
 router.get('/room-chat', roomChatController.listRoomChat);
 router.post('/room-chat', roomChatController.sendRoomChat);
+router.patch('/room-chat/:messageId', roomChatController.updateRoomChat);
 
 module.exports = router;

@@ -17,6 +17,8 @@ module.exports = (io) => {
 
         const doc = {
           ...msg,
+          isAnnouncement: msg.isAnnouncement || false,
+          isPinned: msg.isPinned || false,
           timestamp: new Date(),
         };
         

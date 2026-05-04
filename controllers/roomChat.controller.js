@@ -22,7 +22,7 @@ async function listRoomChat(req, res) {
 async function sendRoomChat(req, res) {
   try {
     const { roomChatCol, messagesCol } = getCollections();
-    const { householdId, senderEmail, senderId, senderName, text, mediaUrl, type, replyTo } = req.body;
+    const { householdId, senderEmail, senderId, senderName, text, mediaUrl, type, replyTo, isAnnouncement, isPinned } = req.body;
 
     if (!householdId || !senderEmail || !senderName || !text) {
       return res.status(400).send({ message: 'Missing required fields' });
@@ -66,6 +66,8 @@ async function sendRoomChat(req, res) {
       reactions: {},
       edited: false,
       deletedAt: null,
+      isAnnouncement: isAnnouncement || false,
+      isPinned: isPinned || false,
       timestamp: new Date(),
     };
 
@@ -100,7 +102,43 @@ async function sendRoomChat(req, res) {
   }
 }
 
+async function updateRoomChat(req, res) {
+  try {
+    const { roomChatCol } = getCollections();
+    const { messageId } = req.params;
+    const { isPinned, isAnnouncement } = req.body;
+
+    if (!messageId) {
+      return res.status(400).send({ message: 'messageId required' });
+    }
+
+    const id = maybeObjectId(messageId);
+    if (!id) {
+      return res.status(400).send({ message: 'Invalid messageId' });
+    }
+
+    const updateData = {};
+    if (typeof isPinned !== 'undefined') updateData.isPinned = isPinned;
+    if (typeof isAnnouncement !== 'undefined') updateData.isAnnouncement = isAnnouncement;
+
+    const result = await roomChatCol.findOneAndUpdate(
+      { _id: id },
+      { $set: updateData },
+      { returnDocument: 'after' }
+    );
+
+    if (!result.value) {
+      return res.status(404).send({ message: 'Message not found' });
+    }
+
+    res.send(result.value);
+  } catch (err) {
+    res.status(500).send({ message: 'Error updating room message', error: err.message });
+  }
+}
+
 module.exports = {
   listRoomChat,
   sendRoomChat,
+  updateRoomChat,
 };
